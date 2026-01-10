@@ -1,0 +1,323 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/client"
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  username  String   @unique
+  password  String
+  name      String
+  role      String // SUPER_ADMIN, ADMIN, FINANCE, FARM_ADMIN, POS_USER, USER
+  branch    String?
+  position  String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions         Transaction[]
+  invoiceAllowances    InvoiceAllowance[]
+  auditLogs            AuditLog[]
+  profileRequests      ProfileChangeRequest[]
+  permissionModules    PermissionModule[]
+  investmentEdits      InvestmentHistory[]    @relation("InvestmentEditedBy")
+  dividendEdits        DividendHistory[]      @relation("DividendEditedBy")
+  expensesCreated      Expense[]
+  expenseEdits         ExpenseHistory[]
+  submittedInvestments MemberInvestment[]     @relation("MemberInvestmentSubmittedBy")
+  approvedInvestments  MemberInvestment[]     @relation("MemberInvestmentApprovedBy")
+}
+
+model Livestock {
+  id            Int            @id @default(autoincrement())
+  type          String // COW, CHICKEN
+  batchId       String? // For chickens
+  tagId         String? // For cows
+  quantity      Int // For chickens (number of birds), For cow (1)
+  initialWeight Float? // For cow
+  currentWeight Float? // For cow
+  status        String // ALIVE, SLAUGHTERED, SOLD, DEAD, PARTIAL_SLAUGHTERED
+  dateReceived  DateTime
+  farmLocation  String?
+  costPrice     Float?
+  notes         String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  slaughterLogs SlaughterLog[]
+}
+
+model SlaughterLog {
+  id          Int       @id @default(autoincrement())
+  livestockId Int
+  livestock   Livestock @relation(fields: [livestockId], references: [id])
+  date        DateTime  @default(now())
+  quantity    Int // Number of animals slaughtered
+  yieldWeight Float? // Total yield in kg
+  notes       String?
+  createdAt   DateTime  @default(now())
+}
+
+model Product {
+  id               Int               @id @default(autoincrement())
+  name             String
+  category         String // CHICKEN_WHOLE, BEEF_PART, etc.
+  unitType         String // PER_UNIT, PER_KG
+  price            Float
+  costPrice        Float?
+  stock            Float // Quantity or Weight available
+  sku              String?           @unique
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  transactionItems TransactionItem[]
+}
+
+model Transaction {
+  id            Int               @id @default(autoincrement())
+  userId        Int
+  user          User              @relation(fields: [userId], references: [id])
+  memberId      Int?
+  member        Member?           @relation(fields: [memberId], references: [id])
+  totalAmount   Float
+  paymentMethod String // CASH, QR, CARD
+  status        String // COMPLETED, REFUNDED
+  date          DateTime          @default(now())
+  items         TransactionItem[]
+}
+
+model TransactionItem {
+  id            Int         @id @default(autoincrement())
+  transactionId Int
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+  productId     Int
+  product       Product     @relation(fields: [productId], references: [id])
+  quantity      Float // Count or Weight
+  price         Float // Price at the time of sale
+  subtotal      Float
+}
+
+model Member {
+  id           Int                @id @default(autoincrement())
+  name         String
+  icNumber     String?            @unique
+  phone        String?
+  points       Int                @default(0)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  transactions Transaction[]
+  investments  MemberInvestment[]
+}
+
+// --- NEW MODULES ---
+
+model AllowanceType {
+  id               Int                    @id @default(autoincrement())
+  name             String                 @unique
+  description      String?
+  approvalRequired Boolean                @default(false)
+  active           Boolean                @default(true)
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  items            InvoiceAllowanceItem[]
+}
+
+model InvoiceAllowance {
+  id                Int                    @id @default(autoincrement())
+  userId            Int
+  user              User                   @relation(fields: [userId], references: [id])
+  invoiceNumber     String                 @unique
+  month             Int
+  year              Int
+  totalAmount       Float
+  status            String
+  approvalTimestamp DateTime?
+  approverRole      String?
+  approverName      String?
+  originalInvoiceId Int?
+  originalInvoice   InvoiceAllowance?      @relation("InvoiceOriginal", fields: [originalInvoiceId], references: [id])
+  adjustments       InvoiceAllowance[]     @relation("InvoiceOriginal")
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  items             InvoiceAllowanceItem[]
+}
+
+model InvoiceAllowanceItem {
+  id              Int              @id @default(autoincrement())
+  invoiceId       Int
+  invoice         InvoiceAllowance @relation(fields: [invoiceId], references: [id])
+  allowanceTypeId Int
+  allowanceType   AllowanceType    @relation(fields: [allowanceTypeId], references: [id])
+  amount          Float
+  description     String?
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  action    String
+  entity    String
+  entityId  String?
+  oldValue  String?
+  newValue  String?
+  details   String?
+  reason    String?
+  timestamp DateTime @default(now())
+}
+
+model ProfileChangeRequest {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  field     String // e.g., "name", "phone"
+  oldValue  String?
+  newValue  String
+  status    String // PENDING, APPROVED, REJECTED
+  adminNote String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// --- Investment Management ---
+model InvestmentSummary {
+  id          Int                 @id @default(autoincrement())
+  totalAmount Float               @default(0)
+  startDate   DateTime
+  category    String // LIVESTOCK, EQUIPMENT, OPERATIONS, etc.
+  active      Boolean             @default(true)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  history     InvestmentHistory[]
+  dividends   DividendSetting[]
+}
+
+model InvestmentHistory {
+  id             Int               @id @default(autoincrement())
+  investmentId   Int
+  investment     InvestmentSummary @relation(fields: [investmentId], references: [id])
+  previousAmount Float
+  newAmount      Float
+  changeType     String // INCREASE, DECREASE, CORRECTION
+  editedByUserId Int
+  editedBy       User              @relation("InvestmentEditedBy", fields: [editedByUserId], references: [id])
+  reason         String
+  timestamp      DateTime          @default(now())
+}
+
+model DividendSetting {
+  id              Int               @id @default(autoincrement())
+  investmentId    Int
+  investment      InvestmentSummary @relation(fields: [investmentId], references: [id])
+  cycle           String // QUARTERLY, HALF_YEAR, YEARLY
+  percentage      Float             @default(0)
+  amount          Float             @default(0)
+  declarationDate DateTime?
+  paymentStatus   String // DECLARED, PAID, CANCELLED
+  active          Boolean           @default(true)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  history         DividendHistory[]
+}
+
+model DividendHistory {
+  id              Int             @id @default(autoincrement())
+  dividendId      Int
+  dividend        DividendSetting @relation(fields: [dividendId], references: [id])
+  cycle           String
+  percentage      Float
+  amount          Float
+  declarationDate DateTime
+  paymentDate     DateTime?
+  status          String
+  editedByUserId  Int
+  editedBy        User            @relation("DividendEditedBy", fields: [editedByUserId], references: [id])
+  createdAt       DateTime        @default(now())
+}
+
+// --- Member Investments ---
+model MemberInvestment {
+  id                Int       @id @default(autoincrement())
+  memberId          Int?
+  member            Member?   @relation(fields: [memberId], references: [id])
+  submittedByUserId Int
+  submittedBy       User      @relation("MemberInvestmentSubmittedBy", fields: [submittedByUserId], references: [id])
+  amount            Float
+  type              String // CASH, BANK_IN
+  bankName          String?
+  referenceNo       String?
+  date              DateTime
+  proofPath         String?
+  notes             String?
+  status            String // PENDING, APPROVED, REJECTED
+  rejectionReason   String?
+  approvedByUserId  Int?
+  approvedBy        User?     @relation("MemberInvestmentApprovedBy", fields: [approvedByUserId], references: [id])
+  approvedAt        DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+}
+
+// --- Granular Permissions (Module-level) ---
+// Future-ready: can be extended with Section and Item tables if needed
+model PermissionModule {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  module    String // e.g., POS, INVENTORY, SLAUGHTER, PRODUCTS, REPORTS, USERS, ALLOWANCE, MY_ALLOWANCE, PROFILE, AUDIT, INVESTMENT, EXPENSES
+  allowed   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, module], name: "PermissionModule_userId_module_key")
+}
+
+// --- Expense Management ---
+model ExpenseCategory {
+  id        Int       @id @default(autoincrement())
+  name      String    @unique
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  expenses  Expense[]
+}
+
+model Expense {
+  id              Int              @id @default(autoincrement())
+  name            String
+  categoryId      Int
+  category        ExpenseCategory  @relation(fields: [categoryId], references: [id])
+  amount          Float
+  date            DateTime
+  paymentMethod   String
+  referenceNo     String?
+  notes           String?
+  createdByUserId Int
+  createdBy       User             @relation(fields: [createdByUserId], references: [id])
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  history         ExpenseHistory[]
+}
+
+model ExpenseHistory {
+  id             Int      @id @default(autoincrement())
+  expenseId      Int
+  expense        Expense  @relation(fields: [expenseId], references: [id])
+  previousAmount Float
+  newAmount      Float
+  editedByUserId Int
+  editedBy       User     @relation(fields: [editedByUserId], references: [id])
+  timestamp      DateTime @default(now())
+}
+
+model ExpenseVisibility {
+  id         Int      @id @default(autoincrement())
+  superAdmin Boolean  @default(true)
+  admin      Boolean  @default(true)
+  finance    Boolean  @default(true)
+  posUser    Boolean  @default(false)
+  farmAdmin  Boolean  @default(false)
+  updatedAt  DateTime @updatedAt
+}
